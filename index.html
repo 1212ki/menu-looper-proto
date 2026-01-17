@@ -159,44 +159,52 @@
           </div>
         </div>
 
-        <section class="controls">
-          <div class="controls__left">
-            <label class="control" for="weekStart">
-              <span>週の開始日</span>
-              <input id="weekStart" type="date" />
-            </label>
-            <div class="controls__buttons">
-              <button type="button" id="prevWeek">前週</button>
-              <button type="button" class="button--primary" id="thisWeek">今週</button>
-              <button type="button" id="nextWeek">次週</button>
-            </div>
-          </div>
-          <div class="controls__right">
-            <div class="week-range" id="weekRange"></div>
-            <div class="save-status" id="saveStatus">保存済み</div>
-            <button type="button" class="button--ghost button--small" id="applySetFromKondate">セットを適用</button>
-            <button type="button" class="button--ghost button--small" id="clearWeek">クリア</button>
-          </div>
-        </section>
-
         <main class="app-content">
-          <section class="checklist" aria-labelledby="shoppingTitle">
-            <div class="checklist__header">
-              <div>
-                <p class="eyebrow">Shopping List</p>
-                <h2 id="shoppingTitle">食材リスト</h2>
-                <p class="checklist__lead">
-                  選んだレシピの食材を人数に合わせて集計
-                </p>
+          <section class="controls">
+            <div class="controls__left">
+              <label class="control" for="weekStart">
+                <span>週の開始日</span>
+                <input id="weekStart" type="date" />
+              </label>
+              <div class="controls__buttons">
+                <button type="button" id="prevWeek">前週</button>
+                <button type="button" class="button--primary" id="thisWeek">今週</button>
+                <button type="button" id="nextWeek">次週</button>
               </div>
             </div>
-            <ul class="checklist__list" id="shoppingList"></ul>
-            <p class="checklist__empty" id="shoppingEmpty">
-              レシピを選択すると買い物リストが表示されます
-            </p>
+            <div class="controls__right">
+              <div class="week-range" id="weekRange"></div>
+              <div class="save-status" id="saveStatus">保存済み</div>
+              <button type="button" class="button--ghost button--small" id="applySetFromKondate">セットを適用</button>
+              <button type="button" class="button--ghost button--small" id="clearWeek">クリア</button>
+            </div>
           </section>
 
           <section class="week-grid" id="weekGrid" aria-live="polite"></section>
+
+          <details class="checklist-collapsible" id="shoppingCollapsible">
+            <summary class="checklist-collapsible__toggle">
+              <span class="material-symbols-rounded">shopping_cart</span>
+              <span>食材リスト</span>
+              <span class="checklist-collapsible__count" id="shoppingCount"></span>
+              <span class="material-symbols-rounded checklist-collapsible__icon">expand_more</span>
+            </summary>
+            <section class="checklist" aria-labelledby="shoppingTitle">
+              <div class="checklist__header">
+                <div>
+                  <p class="eyebrow">Shopping List</p>
+                  <h2 id="shoppingTitle">食材リスト</h2>
+                  <p class="checklist__lead">
+                    選んだレシピの食材を人数に合わせて集計
+                  </p>
+                </div>
+              </div>
+              <ul class="checklist__list" id="shoppingList"></ul>
+              <p class="checklist__empty" id="shoppingEmpty">
+                レシピを選択すると買い物リストが表示されます
+              </p>
+            </section>
+          </details>
         </main>
 
         <footer class="footer">

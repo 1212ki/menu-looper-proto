@@ -1994,6 +1994,9 @@ function renderShoppingList() {
       checkedState[key] = checkbox.checked;
       listItem.classList.toggle("checklist__item--checked", checkbox.checked);
       scheduleSave();
+      // Update badge and count
+      if (typeof updateFabBadge === "function") updateFabBadge();
+      if (typeof updateShoppingCount === "function") updateShoppingCount();
     });
 
     const text = document.createElement("span");
@@ -2536,11 +2539,23 @@ window.openRecipesView = openRecipesViewWithNav;
 window.openLandingView = openLandingViewWithNav;
 window.openPublicRecipesView = openPublicRecipesViewWithNav;
 
-// Override renderShoppingList to update FAB badge
+// Override renderShoppingList to update FAB badge and collapsible count
 const originalRenderShoppingList = renderShoppingList;
+const shoppingCount = document.getElementById("shoppingCount");
+
 function renderShoppingListWithBadge() {
   originalRenderShoppingList.call(this);
   updateFabBadge();
+  updateShoppingCount();
+}
+
+function updateShoppingCount() {
+  if (!shoppingCount) return;
+  const items = shoppingList.querySelectorAll(".checklist__item");
+  const uncheckedCount = Array.from(items).filter(
+    (item) => !item.classList.contains("checklist__item--checked")
+  ).length;
+  shoppingCount.textContent = uncheckedCount > 0 ? `${uncheckedCount}品目` : "";
 }
 
 // Replace the renderShoppingList reference
@@ -3365,8 +3380,12 @@ function applySetToWeek(set, targetWeekStart) {
 
   // Apply set dishes to each day
   set.days.forEach((dayData, index) => {
-    const dayKey = DAY_LABELS[index];
-    weekData.days[dayKey] = {
+    // Calculate the date for this day
+    const date = new Date(targetWeekStart);
+    date.setDate(date.getDate() + index);
+    const dateKey = formatDate(date);
+
+    weekData.days[dateKey] = {
       dishes: dayData.dishes.map(dish => createDishEntry({
         recipeId: dish.recipeId || null,
         draftName: dish.name,
@@ -3374,8 +3393,8 @@ function applySetToWeek(set, targetWeekStart) {
       }))
     };
     // Ensure at least one empty dish if no dishes
-    if (weekData.days[dayKey].dishes.length === 0) {
-      weekData.days[dayKey].dishes.push(createDishEntry());
+    if (weekData.days[dateKey].dishes.length === 0) {
+      weekData.days[dateKey].dishes.push(createDishEntry());
     }
   });
 

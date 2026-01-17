@@ -1273,6 +1273,71 @@ button:disabled {
    Shopping List / Checklist
    ============================================ */
 
+/* Collapsible shopping list */
+.checklist-collapsible {
+  margin-top: var(--space-xl);
+  border-radius: var(--radius-xl);
+  background: var(--surface-elevated);
+  border: 1px solid var(--border-subtle);
+  box-shadow: var(--shadow-soft);
+  overflow: hidden;
+}
+
+.checklist-collapsible__toggle {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: var(--space-md) var(--space-lg);
+  background: var(--avocado);
+  color: white;
+  font-family: var(--font-body);
+  font-size: 1rem;
+  font-weight: 500;
+  cursor: pointer;
+  list-style: none;
+  transition: background var(--transition-fast);
+}
+
+.checklist-collapsible__toggle::-webkit-details-marker {
+  display: none;
+}
+
+.checklist-collapsible__toggle:hover {
+  background: var(--avocado-dark);
+}
+
+.checklist-collapsible__count {
+  margin-left: auto;
+  padding: 0.2em 0.6em;
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: var(--radius-full);
+  font-size: 0.85rem;
+}
+
+.checklist-collapsible__count:empty {
+  display: none;
+}
+
+.checklist-collapsible__icon {
+  transition: transform var(--transition-fast);
+}
+
+.checklist-collapsible[open] .checklist-collapsible__icon {
+  transform: rotate(180deg);
+}
+
+.checklist-collapsible > .checklist {
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+
+.checklist-collapsible > .checklist::before {
+  display: none;
+}
+
 .checklist {
   padding: var(--space-xl);
   border-radius: var(--radius-xl);
