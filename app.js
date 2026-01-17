@@ -78,8 +78,30 @@ const publicTagFilterList = document.getElementById("publicTagFilterList");
 const backToLandingFromPublicButton = document.getElementById("backToLandingFromPublic");
 const openAppFromPublicButton = document.getElementById("openAppFromPublic");
 
-// Public recipes data (initialized early to avoid TDZ errors)
-let publicRecipesData = [];
+// Public recipes data (embedded to avoid CORS issues with file:// protocol)
+const EMBEDDED_PUBLIC_RECIPES = [
+  { id: "pub-001", name: "豚の生姜焼き", servings: 2, tags: ["和食", "定番", "豚肉", "時短"], ingredients: [{ name: "豚ロース薄切り", amount: 200, unit: "g" }, { name: "玉ねぎ", amount: 0.5, unit: "個" }, { name: "生姜", amount: 1, unit: "かけ" }, { name: "醤油", amount: 2, unit: "大さじ" }, { name: "酒", amount: 2, unit: "大さじ" }, { name: "みりん", amount: 1, unit: "大さじ" }, { name: "サラダ油", amount: 1, unit: "大さじ" }], instructions: "1. 生姜をすりおろし、醤油・酒・みりんと合わせてタレを作る\n2. 玉ねぎは薄切りにする\n3. フライパンで豚肉を焼き、玉ねぎを加える\n4. 火が通ったらタレを加えて絡める" },
+  { id: "pub-002", name: "鶏の唐揚げ", servings: 2, tags: ["和食", "定番", "鶏肉", "揚げ物"], ingredients: [{ name: "鶏もも肉", amount: 300, unit: "g" }, { name: "醤油", amount: 2, unit: "大さじ" }, { name: "酒", amount: 1, unit: "大さじ" }, { name: "生姜", amount: 1, unit: "かけ" }, { name: "にんにく", amount: 1, unit: "かけ" }, { name: "片栗粉", amount: 4, unit: "大さじ" }, { name: "揚げ油", amount: 500, unit: "ml" }], instructions: "1. 鶏肉を一口大に切る\n2. すりおろした生姜・にんにく、醤油、酒で下味をつける（15分）\n3. 片栗粉をまぶして170℃の油で揚げる\n4. 一度取り出し、180℃で二度揚げしてカリッと仕上げる" },
+  { id: "pub-003", name: "肉じゃが", servings: 2, tags: ["和食", "定番", "煮物", "牛肉"], ingredients: [{ name: "牛こま肉", amount: 150, unit: "g" }, { name: "じゃがいも", amount: 2, unit: "個" }, { name: "玉ねぎ", amount: 1, unit: "個" }, { name: "にんじん", amount: 0.5, unit: "本" }, { name: "しらたき", amount: 100, unit: "g" }, { name: "醤油", amount: 3, unit: "大さじ" }, { name: "砂糖", amount: 2, unit: "大さじ" }, { name: "酒", amount: 2, unit: "大さじ" }, { name: "だし汁", amount: 300, unit: "ml" }], instructions: "1. じゃがいも・玉ねぎ・にんじんを大きめに切る\n2. 牛肉を炒めてから野菜を加える\n3. だし汁、調味料を加えて落し蓋をして煮る\n4. 汁気が少なくなるまで煮込む" },
+  { id: "pub-004", name: "麻婆豆腐", servings: 2, tags: ["中華", "定番", "豚肉", "時短"], ingredients: [{ name: "絹豆腐", amount: 1, unit: "丁" }, { name: "豚ひき肉", amount: 100, unit: "g" }, { name: "長ねぎ", amount: 0.5, unit: "本" }, { name: "にんにく", amount: 1, unit: "かけ" }, { name: "生姜", amount: 1, unit: "かけ" }, { name: "豆板醤", amount: 1, unit: "大さじ" }, { name: "甜麺醤", amount: 1, unit: "大さじ" }, { name: "鶏がらスープ", amount: 150, unit: "ml" }, { name: "片栗粉", amount: 1, unit: "大さじ" }, { name: "ごま油", amount: 1, unit: "大さじ" }], instructions: "1. 豆腐を2cm角に切り、軽く下茹でする\n2. にんにく・生姜・ねぎをみじん切りにする\n3. 油で香りを出し、ひき肉を炒める\n4. 豆板醤・甜麺醤を加え、スープで煮る\n5. 豆腐を入れて水溶き片栗粉でとろみをつける" },
+  { id: "pub-005", name: "鮭のムニエル", servings: 2, tags: ["洋食", "魚", "時短"], ingredients: [{ name: "生鮭", amount: 2, unit: "切れ" }, { name: "塩", amount: 0.5, unit: "小さじ" }, { name: "こしょう", amount: 0.5, unit: "小さじ" }, { name: "小麦粉", amount: 2, unit: "大さじ" }, { name: "バター", amount: 20, unit: "g" }, { name: "レモン", amount: 0.5, unit: "個" }], instructions: "1. 鮭に塩・こしょうをして5分置く\n2. 水気を拭いて小麦粉をまぶす\n3. フライパンでバターを溶かし、鮭を両面焼く\n4. レモンを添えて完成" },
+  { id: "pub-006", name: "親子丼", servings: 2, tags: ["和食", "定番", "丼", "鶏肉"], ingredients: [{ name: "鶏もも肉", amount: 150, unit: "g" }, { name: "玉ねぎ", amount: 0.5, unit: "個" }, { name: "卵", amount: 3, unit: "個" }, { name: "ご飯", amount: 2, unit: "膳" }, { name: "醤油", amount: 2, unit: "大さじ" }, { name: "みりん", amount: 2, unit: "大さじ" }, { name: "だし汁", amount: 100, unit: "ml" }, { name: "三つ葉", amount: 1, unit: "束" }], instructions: "1. 鶏肉を一口大に、玉ねぎを薄切りにする\n2. 鍋にだし汁・醤油・みりんを入れて煮立てる\n3. 鶏肉・玉ねぎを入れて火を通す\n4. 溶き卵を回し入れ、半熟で火を止める\n5. ご飯にのせて三つ葉を散らす" },
+  { id: "pub-007", name: "回鍋肉", servings: 2, tags: ["中華", "定番", "豚肉", "野菜"], ingredients: [{ name: "豚バラ肉", amount: 150, unit: "g" }, { name: "キャベツ", amount: 4, unit: "枚" }, { name: "ピーマン", amount: 2, unit: "個" }, { name: "長ねぎ", amount: 0.5, unit: "本" }, { name: "にんにく", amount: 1, unit: "かけ" }, { name: "甜麺醤", amount: 2, unit: "大さじ" }, { name: "豆板醤", amount: 0.5, unit: "大さじ" }, { name: "酒", amount: 1, unit: "大さじ" }, { name: "サラダ油", amount: 1, unit: "大さじ" }], instructions: "1. キャベツをざく切り、ピーマンを乱切りにする\n2. 豚肉は食べやすい大きさに切る\n3. 強火で野菜を炒めて取り出す\n4. 豚肉を炒め、調味料を加える\n5. 野菜を戻して全体を炒め合わせる" },
+  { id: "pub-008", name: "ハンバーグ", servings: 2, tags: ["洋食", "定番", "ひき肉"], ingredients: [{ name: "合びき肉", amount: 250, unit: "g" }, { name: "玉ねぎ", amount: 0.5, unit: "個" }, { name: "パン粉", amount: 3, unit: "大さじ" }, { name: "牛乳", amount: 2, unit: "大さじ" }, { name: "卵", amount: 1, unit: "個" }, { name: "塩", amount: 0.5, unit: "小さじ" }, { name: "こしょう", amount: 0.5, unit: "小さじ" }, { name: "ケチャップ", amount: 3, unit: "大さじ" }, { name: "ウスターソース", amount: 2, unit: "大さじ" }], instructions: "1. 玉ねぎをみじん切りにして炒め、冷ます\n2. パン粉を牛乳でふやかす\n3. ひき肉に全ての材料を混ぜ、よくこねる\n4. 小判型に成形し、中央をくぼませる\n5. 両面を焼き、蒸し焼きにして火を通す\n6. ケチャップとソースでソースを作る" },
+  { id: "pub-009", name: "カレーライス", servings: 4, tags: ["洋食", "定番", "カレー"], ingredients: [{ name: "豚こま肉", amount: 200, unit: "g" }, { name: "玉ねぎ", amount: 2, unit: "個" }, { name: "じゃがいも", amount: 2, unit: "個" }, { name: "にんじん", amount: 1, unit: "本" }, { name: "カレールー", amount: 0.5, unit: "箱" }, { name: "水", amount: 700, unit: "ml" }, { name: "サラダ油", amount: 1, unit: "大さじ" }, { name: "ご飯", amount: 4, unit: "膳" }], instructions: "1. 野菜を一口大に切る\n2. 鍋で肉と野菜を炒める\n3. 水を加えてアクを取りながら煮込む\n4. 野菜が柔らかくなったら火を止めてルーを溶かす\n5. 弱火で10分煮込んで完成" },
+  { id: "pub-010", name: "豚キムチ", servings: 2, tags: ["韓国", "豚肉", "時短"], ingredients: [{ name: "豚バラ肉", amount: 150, unit: "g" }, { name: "白菜キムチ", amount: 150, unit: "g" }, { name: "玉ねぎ", amount: 0.5, unit: "個" }, { name: "ニラ", amount: 0.5, unit: "束" }, { name: "ごま油", amount: 1, unit: "大さじ" }, { name: "醤油", amount: 0.5, unit: "大さじ" }], instructions: "1. 豚肉を食べやすい大きさに切る\n2. 玉ねぎは薄切り、ニラは5cm長さに切る\n3. フライパンで豚肉を炒める\n4. 玉ねぎを加え、キムチを入れて炒める\n5. 最後にニラを加え、醤油で味を調える" },
+  { id: "pub-011", name: "チンジャオロース", servings: 2, tags: ["中華", "定番", "牛肉", "野菜"], ingredients: [{ name: "牛こま肉", amount: 150, unit: "g" }, { name: "ピーマン", amount: 3, unit: "個" }, { name: "たけのこ水煮", amount: 100, unit: "g" }, { name: "醤油", amount: 2, unit: "大さじ" }, { name: "オイスターソース", amount: 1, unit: "大さじ" }, { name: "酒", amount: 1, unit: "大さじ" }, { name: "片栗粉", amount: 1, unit: "大さじ" }, { name: "サラダ油", amount: 2, unit: "大さじ" }], instructions: "1. 牛肉を細切りにし、酒と片栗粉をもみ込む\n2. ピーマン・たけのこを細切りにする\n3. 強火で牛肉を炒めて取り出す\n4. 野菜を炒め、肉を戻す\n5. 調味料を加えて手早く炒め合わせる" },
+  { id: "pub-012", name: "豆腐チャンプルー", servings: 2, tags: ["沖縄", "豆腐", "野菜", "時短"], ingredients: [{ name: "木綿豆腐", amount: 1, unit: "丁" }, { name: "豚バラ肉", amount: 100, unit: "g" }, { name: "もやし", amount: 1, unit: "袋" }, { name: "ニラ", amount: 0.5, unit: "束" }, { name: "卵", amount: 2, unit: "個" }, { name: "醤油", amount: 1, unit: "大さじ" }, { name: "顆粒だし", amount: 0.5, unit: "小さじ" }, { name: "かつお節", amount: 1, unit: "袋" }], instructions: "1. 豆腐を水切りし、手でちぎる\n2. 豚肉を炒め、豆腐を加えて焼き色をつける\n3. もやし・ニラを加えて炒める\n4. 調味料で味付けし、溶き卵を回し入れる\n5. かつお節をかけて完成" },
+  { id: "pub-013", name: "鯖の味噌煮", servings: 2, tags: ["和食", "魚", "定番"], ingredients: [{ name: "鯖", amount: 2, unit: "切れ" }, { name: "味噌", amount: 3, unit: "大さじ" }, { name: "砂糖", amount: 2, unit: "大さじ" }, { name: "酒", amount: 100, unit: "ml" }, { name: "水", amount: 100, unit: "ml" }, { name: "生姜", amount: 1, unit: "かけ" }], instructions: "1. 鯖に熱湯をかけて臭みを取る\n2. 鍋に酒・水・砂糖・生姜を入れて煮立てる\n3. 鯖を入れて落し蓋をして煮る\n4. 味噌を溶き入れ、煮汁を煮詰める" },
+  { id: "pub-014", name: "オムライス", servings: 2, tags: ["洋食", "定番", "卵"], ingredients: [{ name: "ご飯", amount: 2, unit: "膳" }, { name: "鶏もも肉", amount: 100, unit: "g" }, { name: "玉ねぎ", amount: 0.5, unit: "個" }, { name: "ケチャップ", amount: 4, unit: "大さじ" }, { name: "卵", amount: 4, unit: "個" }, { name: "バター", amount: 20, unit: "g" }, { name: "塩", amount: 0.5, unit: "小さじ" }, { name: "こしょう", amount: 0.5, unit: "小さじ" }], instructions: "1. 鶏肉と玉ねぎをみじん切りにして炒める\n2. ご飯を加えてケチャップで味付け\n3. 卵を溶いて塩・こしょうを加える\n4. バターを溶かしたフライパンで薄焼き卵を作る\n5. チキンライスを包んで成形" },
+  { id: "pub-015", name: "野菜炒め", servings: 2, tags: ["中華", "野菜", "時短"], ingredients: [{ name: "豚こま肉", amount: 100, unit: "g" }, { name: "キャベツ", amount: 3, unit: "枚" }, { name: "もやし", amount: 1, unit: "袋" }, { name: "にんじん", amount: 0.5, unit: "本" }, { name: "ピーマン", amount: 1, unit: "個" }, { name: "醤油", amount: 1, unit: "大さじ" }, { name: "鶏がらスープの素", amount: 0.5, unit: "小さじ" }, { name: "サラダ油", amount: 1, unit: "大さじ" }], instructions: "1. 野菜を食べやすい大きさに切る\n2. 強火で豚肉を炒める\n3. にんじん→キャベツ→もやし→ピーマンの順に炒める\n4. 調味料で味付けして完成" },
+  { id: "pub-016", name: "鶏のトマト煮込み", servings: 2, tags: ["洋食", "鶏肉", "煮込み"], ingredients: [{ name: "鶏もも肉", amount: 250, unit: "g" }, { name: "玉ねぎ", amount: 1, unit: "個" }, { name: "にんじん", amount: 0.5, unit: "本" }, { name: "トマト缶", amount: 1, unit: "缶" }, { name: "にんにく", amount: 1, unit: "かけ" }, { name: "コンソメ", amount: 1, unit: "個" }, { name: "塩", amount: 0.5, unit: "小さじ" }, { name: "オリーブオイル", amount: 1, unit: "大さじ" }], instructions: "1. 鶏肉を一口大に切り、塩をふる\n2. 玉ねぎ・にんじんを角切りにする\n3. 鶏肉を焼いて取り出し、野菜を炒める\n4. トマト缶・コンソメを加えて煮込む\n5. 鶏肉を戻して20分煮込む" },
+  { id: "pub-017", name: "きのこの炊き込みご飯", servings: 4, tags: ["和食", "ご飯もの", "きのこ"], ingredients: [{ name: "米", amount: 2, unit: "合" }, { name: "しめじ", amount: 1, unit: "パック" }, { name: "まいたけ", amount: 1, unit: "パック" }, { name: "油揚げ", amount: 1, unit: "枚" }, { name: "醤油", amount: 2, unit: "大さじ" }, { name: "酒", amount: 2, unit: "大さじ" }, { name: "だしの素", amount: 1, unit: "小さじ" }], instructions: "1. 米を研いで30分浸水させる\n2. きのこは石づきを取ってほぐす\n3. 油揚げは細切りにする\n4. 炊飯器に米・調味料・具材を入れる\n5. 通常モードで炊いて完成" },
+  { id: "pub-018", name: "豚汁", servings: 4, tags: ["和食", "汁物", "豚肉", "野菜"], ingredients: [{ name: "豚バラ肉", amount: 100, unit: "g" }, { name: "大根", amount: 0.25, unit: "本" }, { name: "にんじん", amount: 0.5, unit: "本" }, { name: "ごぼう", amount: 0.5, unit: "本" }, { name: "こんにゃく", amount: 0.5, unit: "枚" }, { name: "豆腐", amount: 0.5, unit: "丁" }, { name: "味噌", amount: 4, unit: "大さじ" }, { name: "だし汁", amount: 800, unit: "ml" }, { name: "ごま油", amount: 1, unit: "大さじ" }], instructions: "1. 野菜を食べやすい大きさに切る\n2. ごま油で豚肉と野菜を炒める\n3. だし汁を加えて柔らかくなるまで煮る\n4. 豆腐を加え、味噌を溶き入れる" },
+  { id: "pub-019", name: "エビチリ", servings: 2, tags: ["中華", "海鮮", "定番"], ingredients: [{ name: "むきえび", amount: 200, unit: "g" }, { name: "長ねぎ", amount: 0.5, unit: "本" }, { name: "にんにく", amount: 1, unit: "かけ" }, { name: "生姜", amount: 1, unit: "かけ" }, { name: "豆板醤", amount: 1, unit: "大さじ" }, { name: "ケチャップ", amount: 3, unit: "大さじ" }, { name: "鶏がらスープ", amount: 100, unit: "ml" }, { name: "片栗粉", amount: 1, unit: "大さじ" }, { name: "卵", amount: 1, unit: "個" }], instructions: "1. えびに塩と片栗粉をもみ込み、下処理する\n2. にんにく・生姜・ねぎをみじん切りにする\n3. 香味野菜を炒め、豆板醤を加える\n4. ケチャップ・スープを加えて煮立てる\n5. えびを入れ、とろみをつけて溶き卵を回し入れる" },
+  { id: "pub-020", name: "照り焼きチキン", servings: 2, tags: ["和食", "定番", "鶏肉"], ingredients: [{ name: "鶏もも肉", amount: 2, unit: "枚" }, { name: "醤油", amount: 3, unit: "大さじ" }, { name: "みりん", amount: 3, unit: "大さじ" }, { name: "酒", amount: 2, unit: "大さじ" }, { name: "砂糖", amount: 1, unit: "大さじ" }, { name: "サラダ油", amount: 1, unit: "大さじ" }], instructions: "1. 鶏肉の厚い部分を開いて均一にする\n2. フライパンで皮目からじっくり焼く\n3. 裏返して蓋をして蒸し焼きにする\n4. 調味料を合わせて加え、煮絡める\n5. 食べやすく切って盛り付ける" }
+];
+let publicRecipesData = [...EMBEDDED_PUBLIC_RECIPES];
 let publicSelectedTags = [];
 
 const loadingOverlay = document.getElementById("loadingOverlay");
@@ -2588,20 +2610,13 @@ setTimeout(initMobileNav, 0);
 // Public Recipes Functionality
 // ============================================
 
-async function loadPublicRecipes() {
-  try {
-    const response = await fetch("public-recipes.json");
-    const data = await response.json();
-    publicRecipesData = data.recipes || [];
-    if (publicRecipeCount) {
-      publicRecipeCount.textContent = publicRecipesData.length + "件";
-    }
-    return publicRecipesData;
-  } catch (error) {
-    console.error("Failed to load public recipes:", error);
-    publicRecipesData = [];
-    return [];
+function loadPublicRecipes() {
+  // Use embedded data to avoid CORS issues with file:// protocol
+  publicRecipesData = [...EMBEDDED_PUBLIC_RECIPES];
+  if (publicRecipeCount) {
+    publicRecipeCount.textContent = publicRecipesData.length + "件";
   }
+  return publicRecipesData;
 }
 
 function getPublicRecipeTags() {
@@ -2903,14 +2918,13 @@ if (publicRecipeSearch) {
   });
 }
 
-// Load public recipes on page load
-loadPublicRecipes().then(() => {
-  // If we're on public recipes page, re-render after data is loaded
-  if (window.location.hash === "#publicRecipes" || !publicRecipesSection.hidden) {
-    renderPublicRecipes();
-    renderPublicTagFilter();
-  }
-});
+// Load public recipes on page load (now synchronous with embedded data)
+loadPublicRecipes();
+// If we're on public recipes page, re-render after data is loaded
+if (window.location.hash === "#publicRecipes" || !publicRecipesSection.hidden) {
+  renderPublicRecipes();
+  renderPublicTagFilter();
+}
 
 // ============================================
 // Weekly Sets Functionality (1週間を選ぶ)
