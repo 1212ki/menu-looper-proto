@@ -1430,6 +1430,7 @@ function openRecipesView({ scroll } = { scroll: true }) {
   appSection.hidden = true;
   recipesSection.hidden = false;
   publicRecipesSection.hidden = true;
+  if (weeklySetsSection) weeklySetsSection.hidden = true;
   renderTagFilter();
   renderRecipeList();
   if (scroll) {
@@ -1442,6 +1443,7 @@ function openAppView({ scroll } = { scroll: true }) {
   appSection.hidden = false;
   recipesSection.hidden = true;
   publicRecipesSection.hidden = true;
+  if (weeklySetsSection) weeklySetsSection.hidden = true;
   if (scroll) {
     appSection.scrollIntoView({ behavior: "smooth", block: "start" });
   }
@@ -1452,6 +1454,7 @@ function openLandingView() {
   appSection.hidden = true;
   recipesSection.hidden = true;
   publicRecipesSection.hidden = true;
+  if (weeklySetsSection) weeklySetsSection.hidden = true;
 }
 
 function openPublicRecipesView({ scroll } = { scroll: true }) {
@@ -1459,6 +1462,7 @@ function openPublicRecipesView({ scroll } = { scroll: true }) {
   appSection.hidden = true;
   recipesSection.hidden = true;
   publicRecipesSection.hidden = false;
+  if (weeklySetsSection) weeklySetsSection.hidden = true;
   renderPublicRecipes();
   renderPublicTagFilter();
   if (scroll) {
@@ -2454,6 +2458,11 @@ function handleNavClick(navType) {
     case "publicRecipes":
       openPublicRecipesView({ scroll: false });
       history.replaceState(null, "", "#publicRecipes");
+      window.scrollTo({ top: 0, behavior: "smooth" });
+      break;
+    case "weeklySets":
+      openWeeklySetsView({ scroll: false });
+      history.replaceState(null, "", "#weeklySets");
       window.scrollTo({ top: 0, behavior: "smooth" });
       break;
   }
