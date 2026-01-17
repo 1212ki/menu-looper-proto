@@ -42,10 +42,49 @@ const recipeModalIngredientList = document.getElementById("recipeModalIngredient
 const recipeModalIngredientAddButton = document.getElementById("recipeModalIngredientAdd");
 const recipeModalCancelButton = document.getElementById("recipeModalCancel");
 const recipeModalCloseButton = document.getElementById("recipeModalClose");
+const recipeFetchButton = document.getElementById("recipeFetch");
+const recipeFetchStatus = document.getElementById("recipeFetchStatus");
+const recipeTextToggle = document.getElementById("recipeTextToggle");
+const recipeTextArea = document.getElementById("recipeTextArea");
+const recipeTextInput = document.getElementById("recipeTextInput");
+const recipeTextParse = document.getElementById("recipeTextParse");
+
+const recipeModalFetchButton = document.getElementById("recipeModalFetch");
+const recipeModalFetchStatus = document.getElementById("recipeModalFetchStatus");
+const recipeModalTextToggle = document.getElementById("recipeModalTextToggle");
+const recipeModalTextArea = document.getElementById("recipeModalTextArea");
+const recipeModalTextInput = document.getElementById("recipeModalTextInput");
+const recipeModalTextParse = document.getElementById("recipeModalTextParse");
+const recipeModalInstructionsInput = document.getElementById("recipeModalInstructions");
+
+const recipeInstructionsInput = document.getElementById("recipeInstructions");
+
+const recipeTagInput = document.getElementById("recipeTagInput");
+const recipeTagList = document.getElementById("recipeTagList");
+const recipeModalTagInput = document.getElementById("recipeModalTagInput");
+const recipeModalTagList = document.getElementById("recipeModalTagList");
+const tagFilter = document.getElementById("tagFilter");
+const tagFilterList = document.getElementById("tagFilterList");
+
+const loadingOverlay = document.getElementById("loadingOverlay");
+const loadingText = document.getElementById("loadingText");
+
+const CORS_PROXY = "https://api.allorigins.win/raw?url=";
+const OLLAMA_API = "http://localhost:11434/api/generate";
+const OLLAMA_MODEL = "gemma2:2b";
+
+function showLoading(message = "解析中...") {
+  loadingText.textContent = message;
+  loadingOverlay.hidden = false;
+}
+
+function hideLoading() {
+  loadingOverlay.hidden = true;
+}
 
 const DAY_LABELS = ["月", "火", "水", "木", "金", "土", "日"];
 const RECIPE_DB_KEY = "recipe-db-v1";
-const SERVING_OPTIONS = [1, 2];
+const SERVING_OPTIONS = [1, 2, 3, 4];
 const DEFAULT_BASE_SERVINGS = 2;
 const DEFAULT_RECIPE_DB = [
   {
@@ -217,6 +256,90 @@ let editingRecipeId = null;
 let modalDayKey = null;
 let modalDishId = null;
 
+// タグ管理
+let currentTags = [];
+let modalTags = [];
+let activeTagFilter = null;
+
+function getAllTags() {
+  const recipes = loadRecipeDb();
+  const tagSet = new Set();
+  recipes.forEach(recipe => {
+    if (recipe.tags && Array.isArray(recipe.tags)) {
+      recipe.tags.forEach(tag => tagSet.add(tag));
+    }
+  });
+  return Array.from(tagSet).sort();
+}
+
+function renderTagList(container, tags, onRemove) {
+  container.innerHTML = "";
+  tags.forEach(tag => {
+    const tagEl = document.createElement("span");
+    tagEl.className = "tag";
+    tagEl.innerHTML = `${tag}<button type="button" class="tag__remove" aria-label="削除">&times;</button>`;
+    tagEl.querySelector(".tag__remove").addEventListener("click", () => {
+      onRemove(tag);
+    });
+    container.appendChild(tagEl);
+  });
+}
+
+function setupTagInput(input, listEl, tagsArray, updateFn) {
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === ",") {
+      e.preventDefault();
+      const tag = input.value.trim().replace(/,/g, "");
+      if (tag && !tagsArray.includes(tag)) {
+        tagsArray.push(tag);
+        updateFn();
+        renderTagList(listEl, tagsArray, (removedTag) => {
+          const index = tagsArray.indexOf(removedTag);
+          if (index > -1) tagsArray.splice(index, 1);
+          updateFn();
+          renderTagList(listEl, tagsArray, arguments.callee);
+        });
+      }
+      input.value = "";
+    }
+  });
+}
+
+function renderTagFilter() {
+  const allTags = getAllTags();
+  if (allTags.length === 0) {
+    tagFilter.hidden = true;
+    return;
+  }
+  tagFilter.hidden = false;
+  tagFilterList.innerHTML = "";
+
+  // 「すべて」ボタン
+  const allBtn = document.createElement("button");
+  allBtn.type = "button";
+  allBtn.className = `tag-filter__btn ${activeTagFilter === null ? "tag-filter__btn--active" : ""}`;
+  allBtn.textContent = "すべて";
+  allBtn.addEventListener("click", () => {
+    activeTagFilter = null;
+    renderTagFilter();
+    renderRecipeList();
+  });
+  tagFilterList.appendChild(allBtn);
+
+  allTags.forEach(tag => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = `tag-filter__btn ${activeTagFilter === tag ? "tag-filter__btn--active" : ""}`;
+    btn.textContent = tag;
+    btn.addEventListener("click", () => {
+      activeTagFilter = tag;
+      renderTagFilter();
+      renderRecipeList();
+    });
+    tagFilterList.appendChild(btn);
+  });
+}
+
 function formatDate(date) {
   const year = date.getFullYear();
   const month = String(date.getMonth() + 1).padStart(2, "0");
@@ -277,6 +400,8 @@ function saveWeekData() {
 
 function setSaveStatus(text) {
   saveStatus.textContent = text;
+  saveStatus.classList.toggle('save-status--saving', text === '保存中...');
+  saveStatus.classList.toggle('save-status--error', text === '保存に失敗');
 }
 
 function scheduleSave() {
@@ -405,7 +530,7 @@ function resolveDishServings(dish, recipe) {
 
 function normalizeIngredient(entry) {
   if (typeof entry === "string") {
-    return { name: entry, count: 1, grams: 0 };
+    return { name: entry, amount: 0, unit: "" };
   }
   if (!entry || typeof entry !== "object") {
     return null;
@@ -414,11 +539,24 @@ function normalizeIngredient(entry) {
   if (!name) {
     return null;
   }
-  return {
-    name,
-    count: normalizeNumber(entry.count),
-    grams: normalizeNumber(entry.grams),
-  };
+  // Support legacy format (count, grams) and new format (amount, unit)
+  if (entry.amount !== undefined || entry.unit !== undefined) {
+    return {
+      name,
+      amount: normalizeNumber(entry.amount),
+      unit: String(entry.unit || "").trim(),
+    };
+  }
+  // Convert legacy format
+  const count = normalizeNumber(entry.count);
+  const grams = normalizeNumber(entry.grams);
+  if (grams > 0) {
+    return { name, amount: grams, unit: "g" };
+  }
+  if (count > 0) {
+    return { name, amount: count, unit: "個" };
+  }
+  return { name, amount: 0, unit: "" };
 }
 
 function normalizeIngredients(list) {
@@ -429,17 +567,13 @@ function normalizeIngredients(list) {
 }
 
 function formatIngredientDisplay(ingredient) {
-  const parts = [];
-  if (ingredient.count > 0) {
-    parts.push(`x${formatNumber(ingredient.count)}`);
+  if (ingredient.amount > 0 && ingredient.unit) {
+    return `${ingredient.name} ${formatNumber(ingredient.amount)}${ingredient.unit}`;
   }
-  if (ingredient.grams > 0) {
-    parts.push(`${formatNumber(ingredient.grams)}g`);
+  if (ingredient.amount > 0) {
+    return `${ingredient.name} ${formatNumber(ingredient.amount)}`;
   }
-  if (parts.length === 0) {
-    return ingredient.name;
-  }
-  return `${ingredient.name} ${parts.join(" / ")}`;
+  return ingredient.name;
 }
 
 function buildDefaultRecipeDb() {
@@ -523,7 +657,8 @@ function searchRecipes(query) {
     const ingredientsText = recipe.ingredients
       .map((ingredient) => ingredient.name)
       .join(" ");
-    const haystack = normalizeText(`${recipe.name} ${ingredientsText}`);
+    const tagsText = recipe.tags ? recipe.tags.join(" ") : "";
+    const haystack = normalizeText(`${recipe.name} ${ingredientsText} ${tagsText}`);
     return haystack.includes(normalized);
   });
 }
@@ -583,7 +718,11 @@ function openRecipeModal({ dayKey, dishId, name }) {
   recipeModalNameInput.value = name || "";
   recipeModalUrlInput.value = "";
   recipeModalServingsInput.value = String(DEFAULT_BASE_SERVINGS);
+  recipeModalInstructionsInput.value = "";
   resetIngredientList(recipeModalIngredientList);
+  // モーダルのタグをリセット
+  modalTags = [];
+  renderTagList(recipeModalTagList, modalTags, () => {});
   recipeModal.hidden = false;
   document.body.classList.add("modal-open");
   recipeModalNameInput.focus();
@@ -596,7 +735,7 @@ function closeRecipeModal() {
   modalDishId = null;
 }
 
-function createIngredientRow(listEl, { name = "", count = "", grams = "" } = {}) {
+function createIngredientRow(listEl, { name = "", amount = "", unit = "" } = {}) {
   const row = document.createElement("div");
   row.className = "ingredient-row";
 
@@ -606,21 +745,20 @@ function createIngredientRow(listEl, { name = "", count = "", grams = "" } = {})
   nameInput.value = name;
   nameInput.dataset.field = "name";
 
-  const countInput = document.createElement("input");
-  countInput.type = "number";
-  countInput.min = "0";
-  countInput.step = "1";
-  countInput.placeholder = "1";
-  countInput.value = count ? String(count) : "";
-  countInput.dataset.field = "count";
+  const amountInput = document.createElement("input");
+  amountInput.type = "number";
+  amountInput.min = "0";
+  amountInput.step = "any";
+  amountInput.placeholder = "数量";
+  // 数値として有効な値（0を含む）は表示、それ以外は空
+  amountInput.value = (amount !== "" && amount !== null && amount !== undefined) ? String(amount) : "";
+  amountInput.dataset.field = "amount";
 
-  const gramsInput = document.createElement("input");
-  gramsInput.type = "number";
-  gramsInput.min = "0";
-  gramsInput.step = "1";
-  gramsInput.placeholder = "g";
-  gramsInput.value = grams ? String(grams) : "";
-  gramsInput.dataset.field = "grams";
+  const unitInput = document.createElement("input");
+  unitInput.type = "text";
+  unitInput.placeholder = "単位";
+  unitInput.value = unit || "";
+  unitInput.dataset.field = "unit";
 
   const removeButton = document.createElement("button");
   removeButton.type = "button";
@@ -633,8 +771,8 @@ function createIngredientRow(listEl, { name = "", count = "", grams = "" } = {})
   });
 
   row.appendChild(nameInput);
-  row.appendChild(countInput);
-  row.appendChild(gramsInput);
+  row.appendChild(amountInput);
+  row.appendChild(unitInput);
   row.appendChild(removeButton);
   listEl.appendChild(row);
 }
@@ -657,11 +795,10 @@ function collectIngredientsFrom(listEl) {
     if (!name) {
       return;
     }
-    const countValue = row.querySelector('[data-field="count"]').value;
-    const gramsValue = row.querySelector('[data-field="grams"]').value;
-    const count = normalizeNumber(countValue);
-    const grams = normalizeNumber(gramsValue);
-    ingredients.push({ name, count, grams });
+    const amountValue = row.querySelector('[data-field="amount"]').value;
+    const unitValue = row.querySelector('[data-field="unit"]').value.trim();
+    const amount = normalizeNumber(amountValue);
+    ingredients.push({ name, amount, unit: unitValue });
   });
 
   return ingredients;
@@ -682,15 +819,427 @@ function resetRecipeForm() {
   recipeCancelButton.hidden = true;
   recipeForm.reset();
   recipeServingsInput.value = String(DEFAULT_BASE_SERVINGS);
+  recipeInstructionsInput.value = "";
   resetIngredientList(ingredientList);
+  // タグをリセット
+  currentTags = [];
+  renderTagList(recipeTagList, currentTags, () => {});
 }
 
 function fillRecipeForm(recipe) {
   recipeNameInput.value = recipe.name || "";
   recipeUrlInput.value = recipe.url || "";
   recipeServingsInput.value = String(normalizeBaseServings(recipe.baseServings));
+  recipeInstructionsInput.value = recipe.instructions || "";
   resetIngredientList(ingredientList, normalizeIngredients(recipe.ingredients));
+  // タグを設定
+  currentTags = recipe.tags ? [...recipe.tags] : [];
+  renderTagList(recipeTagList, currentTags, (removedTag) => {
+    const index = currentTags.indexOf(removedTag);
+    if (index > -1) currentTags.splice(index, 1);
+    renderTagList(recipeTagList, currentTags, arguments.callee);
+  });
 }
+
+// --- Recipe Fetch from URL ---
+
+function detectUrlType(url) {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase();
+    if (host.includes("youtube.com") || host.includes("youtu.be")) {
+      return "youtube";
+    }
+    if (host.includes("twitter.com") || host.includes("x.com")) {
+      return "twitter";
+    }
+    return "web";
+  } catch {
+    return "web";
+  }
+}
+
+async function fetchUrlContent(url) {
+  const proxyUrl = CORS_PROXY + encodeURIComponent(url);
+  const response = await fetch(proxyUrl);
+  const html = await response.text();
+  return { type: detectUrlType(url), content: html, url };
+}
+
+// JSON-LD (schema.org/Recipe) から直接レシピを抽出
+function extractRecipeFromJsonLd(html) {
+  const scriptRegex = /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
+  let match;
+
+  while ((match = scriptRegex.exec(html)) !== null) {
+    try {
+      const json = JSON.parse(match[1]);
+      const recipes = Array.isArray(json) ? json : [json];
+
+      for (const item of recipes) {
+        // @graph形式の対応
+        const candidates = item["@graph"] ? item["@graph"] : [item];
+
+        for (const candidate of candidates) {
+          if (candidate["@type"] === "Recipe" ||
+              (Array.isArray(candidate["@type"]) && candidate["@type"].includes("Recipe"))) {
+            return parseSchemaRecipe(candidate);
+          }
+        }
+      }
+    } catch (e) {
+      // パース失敗は無視して次へ
+    }
+  }
+  return null;
+}
+
+function parseSchemaRecipe(schema) {
+  const name = schema.name || "";
+  const servings = parseInt(schema.recipeYield) || 2;
+
+  const ingredients = [];
+  const rawIngredients = schema.recipeIngredient || [];
+
+  for (const ing of rawIngredients) {
+    if (typeof ing === "string") {
+      // "玉ねぎ 1個" や "鶏肉 200g" のようなパターンを解析
+      const parsed = parseIngredientString(ing);
+      ingredients.push(parsed);
+    }
+  }
+
+  // 手順を抽出
+  let instructions = "";
+  const rawInstructions = schema.recipeInstructions || [];
+  if (Array.isArray(rawInstructions)) {
+    const steps = rawInstructions.map((step, index) => {
+      if (typeof step === "string") {
+        return `${index + 1}. ${step}`;
+      }
+      if (step && step.text) {
+        return `${index + 1}. ${step.text}`;
+      }
+      if (step && step.name) {
+        return `${index + 1}. ${step.name}`;
+      }
+      return null;
+    }).filter(Boolean);
+    instructions = steps.join("\n");
+  } else if (typeof rawInstructions === "string") {
+    instructions = rawInstructions;
+  }
+
+  return { name, servings, ingredients, instructions };
+}
+
+function parseIngredientString(str) {
+  // 数量と単位を抽出する簡易パーサー
+  const result = { name: str.trim(), amount: "", unit: "" };
+
+  // ミリリットル: "200ml", "200mL", "200ミリリットル"
+  const mlMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:ml|mL|ミリリットル)/i);
+  if (mlMatch) {
+    result.amount = parseFloat(mlMatch[1]);
+    result.unit = "ml";
+    result.name = str.replace(mlMatch[0], "").trim();
+    result.name = result.name.replace(/^\d+(?:\.\d+)?\s*/, "").trim();
+    if (!result.name) result.name = str.trim();
+    return result;
+  }
+
+  // グラム数: "200g", "200グラム"
+  const gramsMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:g|グラム)/i);
+  if (gramsMatch) {
+    result.amount = parseFloat(gramsMatch[1]);
+    result.unit = "g";
+    result.name = str.replace(gramsMatch[0], "").trim();
+    result.name = result.name.replace(/^\d+(?:\.\d+)?\s*/, "").trim();
+    if (!result.name) result.name = str.trim();
+    return result;
+  }
+
+  // cc/CC: "200cc"
+  const ccMatch = str.match(/(\d+(?:\.\d+)?)\s*(?:cc|CC)/i);
+  if (ccMatch) {
+    result.amount = parseFloat(ccMatch[1]);
+    result.unit = "ml";
+    result.name = str.replace(ccMatch[0], "").trim();
+    result.name = result.name.replace(/^\d+(?:\.\d+)?\s*/, "").trim();
+    if (!result.name) result.name = str.trim();
+    return result;
+  }
+
+  // 日本語の単位パターン（単位が先、数量が後: "大さじ1", "大さじ1/2"）
+  const unitFirstPatterns = [
+    { regex: /(大さじ)\s*(\d+(?:\/\d+)?)/, unit: "大さじ" },
+    { regex: /(小さじ)\s*(\d+(?:\/\d+)?)/, unit: "小さじ" },
+    { regex: /(カップ)\s*(\d+(?:\/\d+)?)/, unit: "カップ" },
+  ];
+
+  for (const { regex, unit } of unitFirstPatterns) {
+    const match = str.match(regex);
+    if (match) {
+      const amountStr = match[2];
+      if (amountStr.includes("/")) {
+        const [num, den] = amountStr.split("/").map(Number);
+        result.amount = num / den;
+      } else {
+        result.amount = parseFloat(amountStr);
+      }
+      result.unit = unit;
+      result.name = str.replace(match[0], "").trim();
+      if (!result.name) result.name = str.trim();
+      return result;
+    }
+  }
+
+  // 単位付き数量（数量が先: "1個", "2本", "1/2片"）
+  const unitPatterns = [
+    { regex: /(\d+(?:\/\d+)?)\s*(個)/, unit: "個" },
+    { regex: /(\d+(?:\/\d+)?)\s*(本)/, unit: "本" },
+    { regex: /(\d+(?:\/\d+)?)\s*(枚)/, unit: "枚" },
+    { regex: /(\d+(?:\/\d+)?)\s*(切れ)/, unit: "切れ" },
+    { regex: /(\d+(?:\/\d+)?)\s*(片)/, unit: "片" },
+    { regex: /(\d+(?:\/\d+)?)\s*(かけ)/, unit: "かけ" },
+    { regex: /(\d+(?:\/\d+)?)\s*(束)/, unit: "束" },
+    { regex: /(\d+(?:\/\d+)?)\s*(袋)/, unit: "袋" },
+    { regex: /(\d+(?:\/\d+)?)\s*(パック)/, unit: "パック" },
+    { regex: /(\d+(?:\/\d+)?)\s*(丁)/, unit: "丁" },
+    { regex: /(\d+(?:\/\d+)?)\s*(合)/, unit: "合" },
+    { regex: /(\d+(?:\/\d+)?)\s*(房)/, unit: "房" },
+    { regex: /(\d+(?:\/\d+)?)\s*(玉)/, unit: "玉" },
+    { regex: /(\d+(?:\/\d+)?)\s*(株)/, unit: "株" },
+    { regex: /(\d+(?:\/\d+)?)\s*(缶)/, unit: "缶" },
+  ];
+
+  for (const { regex, unit } of unitPatterns) {
+    const match = str.match(regex);
+    if (match) {
+      const amountStr = match[1];
+      if (amountStr.includes("/")) {
+        const [num, den] = amountStr.split("/").map(Number);
+        result.amount = num / den;
+      } else {
+        result.amount = parseFloat(amountStr);
+      }
+      result.unit = unit;
+      result.name = str.replace(match[0], "").trim();
+      if (!result.name) result.name = str.trim();
+      return result;
+    }
+  }
+
+  // 「少々」「適量」「ひとつまみ」などはそのまま単位として扱う
+  const vaguePatterns = [
+    { regex: /(少々)/, unit: "少々" },
+    { regex: /(適量)/, unit: "適量" },
+    { regex: /(ひとつまみ)/, unit: "ひとつまみ" },
+    { regex: /(お好みで)/, unit: "お好みで" },
+    { regex: /(適宜)/, unit: "適宜" },
+  ];
+
+  for (const { regex, unit } of vaguePatterns) {
+    const match = str.match(regex);
+    if (match) {
+      result.unit = unit;
+      result.name = str.replace(match[0], "").trim();
+      if (!result.name) result.name = str.trim();
+      return result;
+    }
+  }
+
+  // 名前のクリーンアップ（数量部分を除去）
+  result.name = result.name.replace(/^\d+(?:\.\d+)?\s*/, "").trim();
+  if (!result.name) result.name = str.trim();
+
+  return result;
+}
+
+// AIやJSON-LDから取得した食材データを正規化するヘルパー関数
+function normalizeIngredients(ingredients) {
+  if (!ingredients || !Array.isArray(ingredients)) return [];
+  return ingredients.map(ing => {
+    const hasAmount = ing.amount !== undefined && ing.amount !== null && ing.amount !== "" && ing.amount !== 0;
+    const hasUnit = ing.unit && ing.unit.trim() !== "";
+    // amountとunitが空の場合、nameを再解析して数量を抽出
+    if (!hasAmount && !hasUnit && ing.name) {
+      const parsed = parseIngredientString(ing.name);
+      return {
+        name: parsed.name || ing.name,
+        amount: parsed.amount !== "" ? parsed.amount : "",
+        unit: parsed.unit || ""
+      };
+    }
+    return {
+      name: ing.name || "",
+      amount: hasAmount ? ing.amount : "",
+      unit: ing.unit || ""
+    };
+  });
+}
+
+function buildRecipeParsePrompt(html) {
+  return `以下のHTMLからレシピ情報を抽出してJSON形式で返してください。
+
+必ず以下の形式のJSONのみを返してください（説明不要）:
+{"name":"レシピ名","servings":2,"ingredients":[{"name":"食材名","amount":200,"unit":"g"}],"instructions":"1. 手順1\\n2. 手順2"}
+
+注意:
+- nameはレシピのタイトル（必須）
+- servingsは基準人数（整数）
+- amountは数量、unitは単位（g, ml, 個, 本, 片, かけ, 枚, 大さじ, 小さじ等）
+- 「適量」「少々」などは数量を省略
+- instructionsは調理手順（番号付きで改行区切り）
+- JSONのみ返すこと
+
+HTML:
+${html.slice(0, 8000)}`;
+}
+
+function buildTextParsePrompt(text) {
+  return `以下のテキストからレシピ情報を抽出してJSON形式で返してください。
+ツイートやSNS投稿の場合、スレッド全体から材料と手順を集めてください。
+
+必ず以下の形式のJSONのみを返してください（説明不要）:
+{"name":"レシピ名","servings":2,"ingredients":[{"name":"食材名","amount":200,"unit":"g"}],"instructions":"1. 手順1\\n2. 手順2"}
+
+注意:
+- nameは料理名（必須、テキストから推測）
+- servingsは基準人数（整数、不明なら2）
+- amountは数量、unitは単位（g, ml, 個, 本, 片, かけ, 枚, 大さじ, 小さじ等）
+- 「適量」「少々」などは数量を省略
+- instructionsは調理手順（番号付きで改行区切り）
+- JSONのみ返すこと
+
+テキスト:
+${text.slice(0, 4000)}`;
+}
+
+async function parseTextWithOllama(text, statusEl) {
+  showLoading("テキストを解析中...");
+
+  try {
+    const prompt = buildTextParsePrompt(text);
+    const recipe = await callOllamaApi(prompt);
+    return recipe;
+  } catch (error) {
+    throw new Error("テキストの解析に失敗しました: " + error.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+async function callOllamaApi(prompt) {
+  const response = await fetch(OLLAMA_API, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      model: OLLAMA_MODEL,
+      prompt: prompt,
+      stream: false
+    })
+  });
+
+  if (!response.ok) {
+    throw new Error(`Ollama error: ${response.status}`);
+  }
+
+  const data = await response.json();
+  const text = data.response || "";
+
+  // JSONを抽出
+  const jsonMatch = text.match(/\{[\s\S]*\}/);
+  if (!jsonMatch) {
+    throw new Error("レシピ情報を抽出できませんでした");
+  }
+
+  return JSON.parse(jsonMatch[0]);
+}
+
+async function fetchAndParseRecipe(url, statusEl) {
+  showLoading("URLを取得中...");
+
+  try {
+    const urlData = await fetchUrlContent(url);
+
+    // 1. まずJSON-LDを試す（高速・正確）
+    showLoading("レシピデータを検索中...");
+    const jsonLdRecipe = extractRecipeFromJsonLd(urlData.content);
+
+    if (jsonLdRecipe && jsonLdRecipe.name) {
+      setFetchStatus(statusEl, "success", "JSON-LDから取得しました");
+      return jsonLdRecipe;
+    }
+
+    // 2. JSON-LDがなければOllamaで解析
+    showLoading("AIで解析中（ローカル）...");
+
+    const prompt = buildRecipeParsePrompt(urlData.content);
+    const recipe = await callOllamaApi(prompt);
+    return recipe;
+  } catch (error) {
+    throw new Error("レシピの解析に失敗しました: " + error.message);
+  } finally {
+    hideLoading();
+  }
+}
+
+function setFetchStatus(el, type, message) {
+  if (!el) return;
+  el.textContent = message;
+  el.className = "form-field__help";
+  if (type === "loading") {
+    el.classList.add("form-field__help--loading");
+  } else if (type === "error") {
+    el.classList.add("form-field__help--error");
+  } else if (type === "success") {
+    el.classList.add("form-field__help--success");
+  }
+}
+
+function clearFetchStatus(el) {
+  if (!el) return;
+  el.textContent = "";
+  el.className = "form-field__help";
+}
+
+async function handleRecipeFetch(urlInput, nameInput, servingsInput, ingredientListEl, instructionsInput, statusEl) {
+  const url = urlInput.value.trim();
+  if (!url) {
+    setFetchStatus(statusEl, "error", "URLを入力してください");
+    return;
+  }
+
+  try {
+    const recipe = await fetchAndParseRecipe(url, statusEl);
+
+    // Fill form fields - always update recipe name from parsed data
+    if (recipe.name) {
+      nameInput.value = recipe.name;
+    }
+
+    if (recipe.servings) {
+      const servings = normalizeBaseServings(recipe.servings);
+      servingsInput.value = String(servings);
+    }
+
+    if (recipe.ingredients && recipe.ingredients.length > 0) {
+      resetIngredientList(ingredientListEl, normalizeIngredients(recipe.ingredients));
+    }
+
+    if (recipe.instructions && instructionsInput) {
+      instructionsInput.value = recipe.instructions;
+    }
+
+    setFetchStatus(statusEl, "success", "レシピを取得しました");
+    setTimeout(() => clearFetchStatus(statusEl), 3000);
+  } catch (error) {
+    setFetchStatus(statusEl, "error", error.message || "取得に失敗しました");
+  }
+}
+
+// --- End Recipe Fetch ---
 
 function startEditingRecipe(recipe) {
   editingRecipeId = recipe.id;
@@ -702,26 +1251,77 @@ function startEditingRecipe(recipe) {
 
 function renderRecipeList() {
   const query = recipeSearchInput.value.trim();
-  const list = query ? searchRecipes(query) : recipeDb.slice();
+  let list = query ? searchRecipes(query) : recipeDb.slice();
+
+  // タグフィルターが有効な場合はフィルタリング
+  if (activeTagFilter) {
+    list = list.filter(recipe =>
+      recipe.tags && recipe.tags.includes(activeTagFilter)
+    );
+  }
+
   recipeList.innerHTML = "";
 
   if (list.length === 0) {
     recipeEmpty.hidden = false;
+    recipeEmpty.textContent = activeTagFilter
+      ? `「${activeTagFilter}」タグのメニューはありません`
+      : "まだメニューがありません";
     return;
   }
   recipeEmpty.hidden = true;
 
   list.forEach((recipe) => {
     const card = document.createElement("article");
-    card.className = "recipe-card";
+    card.className = "recipe-card recipe-card--compact";
 
-    const header = document.createElement("div");
-    header.className = "recipe-card__header";
+    // クリック可能なエリア（タイトル + サマリー）
+    const clickable = document.createElement("div");
+    clickable.className = "recipe-card__clickable";
+    clickable.addEventListener("click", () => {
+      const detailEl = card.querySelector(".recipe-card__detail");
+      if (detailEl) {
+        detailEl.hidden = !detailEl.hidden;
+        card.classList.toggle("recipe-card--expanded", !detailEl.hidden);
+      }
+    });
 
     const title = document.createElement("h3");
     title.className = "recipe-card__title";
     title.textContent = recipe.name;
+    clickable.appendChild(title);
 
+    // タグ表示
+    if (recipe.tags && recipe.tags.length > 0) {
+      const tagsEl = document.createElement("div");
+      tagsEl.className = "recipe-card__tags";
+      recipe.tags.forEach(tag => {
+        const tagEl = document.createElement("span");
+        tagEl.className = "tag tag--small";
+        tagEl.textContent = tag;
+        tagEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          activeTagFilter = tag;
+          renderTagFilter();
+          renderRecipeList();
+        });
+        tagsEl.appendChild(tagEl);
+      });
+      clickable.appendChild(tagsEl);
+    }
+
+    // 簡易情報（食材数 + 基準人数）
+    const summary = document.createElement("p");
+    summary.className = "recipe-card__summary";
+    const ingredientCount = recipe.ingredients.length;
+    const servingsText = `${formatNumber(normalizeBaseServings(recipe.baseServings))}人前`;
+    const ingredientText = ingredientCount > 0 ? `食材${ingredientCount}種` : "食材未登録";
+    summary.textContent = `${servingsText} ・ ${ingredientText}`;
+    clickable.appendChild(summary);
+
+    card.appendChild(clickable);
+
+    // アクションボタン（編集・削除のみ）
     const actions = document.createElement("div");
     actions.className = "recipe-card__actions";
 
@@ -729,13 +1329,17 @@ function renderRecipeList() {
     editButton.type = "button";
     editButton.className = "button--ghost button--small";
     editButton.textContent = "編集";
-    editButton.addEventListener("click", () => startEditingRecipe(recipe));
+    editButton.addEventListener("click", (e) => {
+      e.stopPropagation();
+      startEditingRecipe(recipe);
+    });
 
     const deleteButton = document.createElement("button");
     deleteButton.type = "button";
-    deleteButton.className = "button--ghost button--small";
+    deleteButton.className = "button--ghost button--small button--danger";
     deleteButton.textContent = "削除";
-    deleteButton.addEventListener("click", () => {
+    deleteButton.addEventListener("click", (e) => {
+      e.stopPropagation();
       const ok = window.confirm(`「${recipe.name}」を削除しますか？`);
       if (!ok) {
         return;
@@ -748,33 +1352,33 @@ function renderRecipeList() {
 
     actions.appendChild(editButton);
     actions.appendChild(deleteButton);
-    header.appendChild(title);
-    header.appendChild(actions);
-    card.appendChild(header);
+    card.appendChild(actions);
 
-    const servings = document.createElement("p");
-    servings.className = "recipe-card__meta";
-    servings.textContent = `基準: ${formatNumber(
-      normalizeBaseServings(recipe.baseServings),
-    )}人前`;
-    card.appendChild(servings);
+    // 詳細（初期は非表示）
+    const detail = document.createElement("div");
+    detail.className = "recipe-card__detail";
+    detail.hidden = true;
 
+    // URL
     if (recipe.url) {
-      const url = document.createElement("a");
-      url.className = "recipe-card__url";
-      url.href = recipe.url;
-      url.target = "_blank";
-      url.rel = "noreferrer";
-      url.textContent = recipe.url;
-      card.appendChild(url);
-    } else {
-      const url = document.createElement("p");
-      url.className = "recipe-detail__notice";
-      url.textContent = "URLは未登録";
-      card.appendChild(url);
+      const urlEl = document.createElement("a");
+      urlEl.className = "recipe-card__url";
+      urlEl.href = recipe.url;
+      urlEl.target = "_blank";
+      urlEl.rel = "noreferrer";
+      urlEl.textContent = "レシピページを開く →";
+      detail.appendChild(urlEl);
     }
 
+    // 食材リスト
     if (recipe.ingredients.length > 0) {
+      const ingredientsSection = document.createElement("div");
+      ingredientsSection.className = "recipe-card__section";
+      const ingredientsTitle = document.createElement("p");
+      ingredientsTitle.className = "recipe-card__section-title";
+      ingredientsTitle.textContent = "食材";
+      ingredientsSection.appendChild(ingredientsTitle);
+
       const listEl = document.createElement("ul");
       listEl.className = "recipe-card__ingredients";
       recipe.ingredients.forEach((ingredient) => {
@@ -782,14 +1386,26 @@ function renderRecipeList() {
         item.textContent = formatIngredientDisplay(ingredient);
         listEl.appendChild(item);
       });
-      card.appendChild(listEl);
-    } else {
-      const empty = document.createElement("p");
-      empty.className = "recipe-detail__notice";
-      empty.textContent = "食材が未登録";
-      card.appendChild(empty);
+      ingredientsSection.appendChild(listEl);
+      detail.appendChild(ingredientsSection);
     }
 
+    // 作り方
+    if (recipe.instructions) {
+      const instructionsSection = document.createElement("div");
+      instructionsSection.className = "recipe-card__section";
+      const instructionsTitle = document.createElement("p");
+      instructionsTitle.className = "recipe-card__section-title";
+      instructionsTitle.textContent = "作り方";
+      instructionsSection.appendChild(instructionsTitle);
+      const instructionsText = document.createElement("pre");
+      instructionsText.className = "recipe-card__instructions-text";
+      instructionsText.textContent = recipe.instructions;
+      instructionsSection.appendChild(instructionsText);
+      detail.appendChild(instructionsSection);
+    }
+
+    card.appendChild(detail);
     recipeList.appendChild(card);
   });
 }
@@ -798,6 +1414,7 @@ function openRecipesView({ scroll } = { scroll: true }) {
   landingSection.hidden = true;
   appSection.hidden = true;
   recipesSection.hidden = false;
+  renderTagFilter();
   renderRecipeList();
   if (scroll) {
     recipesSection.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -838,13 +1455,28 @@ function syncViewFromHash() {
 function renderSearchResults({ query, container, dayKey, dishId }) {
   container.innerHTML = "";
   const trimmed = query.trim();
-  if (!trimmed) {
+
+  // クエリが空の場合は全レシピを表示（最大8件）
+  const matches = trimmed
+    ? searchRecipes(trimmed).slice(0, 6)
+    : recipeDb.slice(0, 8);
+  const exactMatch = trimmed ? getRecipeByName(trimmed) : null;
+
+  // レシピがない場合はヒントを表示
+  if (recipeDb.length === 0 && !trimmed) {
     container.hidden = true;
     return;
   }
-  const matches = searchRecipes(trimmed).slice(0, 6);
-  const exactMatch = getRecipeByName(trimmed);
+
   container.hidden = false;
+
+  // 空クエリで候補がある場合、ヘッダーを表示
+  if (!trimmed && matches.length > 0) {
+    const header = document.createElement("div");
+    header.className = "recipe-search__header";
+    header.textContent = "登録済みのレシピ";
+    container.appendChild(header);
+  }
 
   if (matches.length === 0) {
     const empty = document.createElement("div");
@@ -876,7 +1508,7 @@ function renderSearchResults({ query, container, dayKey, dishId }) {
     });
   }
 
-  if (!exactMatch) {
+  if (trimmed && !exactMatch) {
     const createButton = document.createElement("button");
     createButton.type = "button";
     createButton.className = "recipe-search__item recipe-search__item--create";
@@ -888,136 +1520,122 @@ function renderSearchResults({ query, container, dayKey, dishId }) {
   }
 }
 
-function renderDishDetail({ dish, recipe, dayKey }) {
-  const detail = document.createElement("div");
-  detail.className = "recipe-detail";
+/**
+ * 統合された料理カード（レシピ選択済みの場合のみ）
+ * コンパクト表示 + クリックで詳細展開
+ */
+function renderUnifiedDishCard({ dish, recipe, dayKey }) {
+  const card = document.createElement("div");
+  card.className = "unified-dish-card";
 
-  if (recipe) {
-    const baseServings = normalizeBaseServings(recipe.baseServings);
-    const name = document.createElement("div");
-    name.className = "recipe-detail__name";
-    name.textContent = recipe.name;
-    detail.appendChild(name);
-
-    const servings = document.createElement("p");
-    servings.className = "recipe-detail__meta";
-    servings.textContent = `基準: ${formatNumber(baseServings)}人前`;
-    detail.appendChild(servings);
-
-    if (recipe.url) {
-      const link = document.createElement("a");
-      link.className = "recipe-detail__link";
-      link.href = recipe.url;
-      link.target = "_blank";
-      link.rel = "noreferrer";
-      link.textContent = "レシピURLを開く";
-      detail.appendChild(link);
-    } else {
-      const url = document.createElement("p");
-      url.className = "recipe-detail__notice";
-      url.textContent = "URLは未登録";
-      detail.appendChild(url);
+  // コンパクト表示（クリックで詳細展開）
+  const compact = document.createElement("div");
+  compact.className = "unified-dish-card__compact";
+  compact.addEventListener("click", () => {
+    const expandedEl = card.querySelector(".unified-dish-card__expanded");
+    if (expandedEl) {
+      expandedEl.hidden = !expandedEl.hidden;
+      card.classList.toggle("unified-dish-card--expanded", !expandedEl.hidden);
     }
+  });
 
-    if (recipe.ingredients.length > 0) {
-      const listEl = document.createElement("ul");
-      listEl.className = "recipe-detail__ingredients";
-      recipe.ingredients.forEach((ingredient) => {
-        const item = document.createElement("li");
-        item.textContent = formatIngredientDisplay(ingredient);
-        listEl.appendChild(item);
-      });
-      detail.appendChild(listEl);
-    } else {
-      const empty = document.createElement("p");
-      empty.className = "recipe-detail__notice";
-      empty.textContent = "食材が未登録";
-      detail.appendChild(empty);
-    }
+  const name = document.createElement("span");
+  name.className = "unified-dish-card__name";
+  name.textContent = recipe.name;
+  compact.appendChild(name);
 
-    const actions = document.createElement("div");
-    actions.className = "recipe-detail__actions";
+  const indicator = document.createElement("span");
+  indicator.className = "unified-dish-card__indicator";
+  indicator.textContent = "▼";
+  compact.appendChild(indicator);
 
-    const clearButton = document.createElement("button");
-    clearButton.type = "button";
-    clearButton.className = "button--ghost button--small";
-    clearButton.textContent = "選択解除";
-    clearButton.addEventListener("click", () => {
-      clearDishSelection(dayKey, dish.id);
-    });
+  card.appendChild(compact);
 
-    const editButton = document.createElement("button");
-    editButton.type = "button";
-    editButton.className = "button--ghost button--small";
-    editButton.textContent = "レシピを編集";
-    editButton.addEventListener("click", () => {
-      openRecipesView({ scroll: true });
-      history.replaceState(null, "", "#recipes");
-      startEditingRecipe(recipe);
-    });
+  // 詳細部分（初期は非表示）
+  const expanded = document.createElement("div");
+  expanded.className = "unified-dish-card__expanded";
+  expanded.hidden = true;
 
-    actions.appendChild(clearButton);
-    actions.appendChild(editButton);
-    detail.appendChild(actions);
+  const baseServings = normalizeBaseServings(recipe.baseServings);
+  const meta = document.createElement("p");
+  meta.className = "unified-dish-card__meta";
+  meta.textContent = `基準: ${formatNumber(baseServings)}人前`;
+  expanded.appendChild(meta);
 
-    return detail;
+  if (recipe.url) {
+    const link = document.createElement("a");
+    link.className = "unified-dish-card__link";
+    link.href = recipe.url;
+    link.target = "_blank";
+    link.rel = "noreferrer";
+    link.textContent = "レシピページを開く";
+    link.addEventListener("click", (e) => e.stopPropagation());
+    expanded.appendChild(link);
   }
 
-  if (dish.recipeId && !recipe) {
-    const empty = document.createElement("p");
-    empty.className = "recipe-detail__empty";
-    empty.textContent = "レシピが削除されています。";
-    detail.appendChild(empty);
+  if (recipe.ingredients.length > 0) {
+    const ingredientsSection = document.createElement("div");
+    ingredientsSection.className = "unified-dish-card__section";
+    const ingredientsTitle = document.createElement("p");
+    ingredientsTitle.className = "unified-dish-card__section-title";
+    ingredientsTitle.textContent = "食材";
+    ingredientsSection.appendChild(ingredientsTitle);
 
-    const clearButton = document.createElement("button");
-    clearButton.type = "button";
-    clearButton.className = "button--ghost button--small";
-    clearButton.textContent = "選択解除";
-    clearButton.addEventListener("click", () => {
-      clearDishSelection(dayKey, dish.id);
+    const listEl = document.createElement("ul");
+    listEl.className = "unified-dish-card__ingredients";
+    recipe.ingredients.forEach((ingredient) => {
+      const item = document.createElement("li");
+      item.textContent = formatIngredientDisplay(ingredient);
+      listEl.appendChild(item);
     });
-    detail.appendChild(clearButton);
-
-    return detail;
+    ingredientsSection.appendChild(listEl);
+    expanded.appendChild(ingredientsSection);
   }
 
-  if (dish.draftName) {
-    const legacy = document.createElement("p");
-    legacy.className = "recipe-detail__empty";
-    legacy.textContent = `入力中: ${dish.draftName}`;
-    detail.appendChild(legacy);
-
-    const actions = document.createElement("div");
-    actions.className = "recipe-detail__actions";
-
-    const registerButton = document.createElement("button");
-    registerButton.type = "button";
-    registerButton.className = "button--ghost button--small";
-    registerButton.textContent = "レシピDBに追加";
-    registerButton.addEventListener("click", () => {
-      resetRecipeForm();
-      fillRecipeForm({ name: dish.draftName, url: "", ingredients: [] });
-      openRecipesView({ scroll: true });
-      history.replaceState(null, "", "#recipes");
-    });
-
-    actions.appendChild(registerButton);
-    detail.appendChild(actions);
-
-    return detail;
+  if (recipe.instructions) {
+    const instructionsSection = document.createElement("div");
+    instructionsSection.className = "unified-dish-card__section";
+    const instructionsTitle = document.createElement("p");
+    instructionsTitle.className = "unified-dish-card__section-title";
+    instructionsTitle.textContent = "作り方";
+    instructionsSection.appendChild(instructionsTitle);
+    const instructionsText = document.createElement("pre");
+    instructionsText.className = "unified-dish-card__instructions";
+    instructionsText.textContent = recipe.instructions;
+    instructionsSection.appendChild(instructionsText);
+    expanded.appendChild(instructionsSection);
   }
 
-  const empty = document.createElement("p");
-  empty.className = "recipe-detail__empty";
-  empty.textContent = "まだ品目が選択されていません。";
-  detail.appendChild(empty);
+  const actions = document.createElement("div");
+  actions.className = "unified-dish-card__actions";
 
-  const hint = document.createElement("p");
-  hint.className = "recipe-detail__notice";
-  hint.textContent = "料理名を入力すると候補が出ます。";
-  detail.appendChild(hint);
+  const clearButton = document.createElement("button");
+  clearButton.type = "button";
+  clearButton.className = "button--ghost button--small";
+  clearButton.textContent = "解除";
+  clearButton.addEventListener("click", (e) => {
+    e.stopPropagation();
+    clearDishSelection(dayKey, dish.id);
+  });
 
-  return detail;
+  const editButton = document.createElement("button");
+  editButton.type = "button";
+  editButton.className = "button--ghost button--small";
+  editButton.textContent = "編集";
+  editButton.addEventListener("click", (e) => {
+    e.stopPropagation();
+    openRecipesView({ scroll: true });
+    history.replaceState(null, "", "#recipes");
+    startEditingRecipe(recipe);
+  });
+
+  actions.appendChild(clearButton);
+  actions.appendChild(editButton);
+  expanded.appendChild(actions);
+
+  card.appendChild(expanded);
+
+  return card;
 }
 
 function renderServingControl({ dish, recipe }) {
@@ -1140,7 +1758,7 @@ function renderWeek(weekStart) {
         const removeButton = document.createElement("button");
         removeButton.type = "button";
         removeButton.className = "button--ghost button--small";
-        removeButton.textContent = "品目を削除";
+        removeButton.textContent = "削除";
         removeButton.addEventListener("click", () => {
           removeDish(dateKey, dish.id);
         });
@@ -1151,70 +1769,101 @@ function renderWeek(weekStart) {
       dishHeader.appendChild(dishActions);
       dishCard.appendChild(dishHeader);
 
-      const searchWrapper = document.createElement("div");
-      searchWrapper.className = "recipe-search";
-
-      const label = document.createElement("label");
-      label.textContent = "料理名";
-
-      const input = document.createElement("input");
-      input.type = "text";
-      input.placeholder = "料理名を入力";
+      // レシピが選択されている場合は統合されたコンパクトカードを表示
       if (selectedRecipe) {
-        input.value = selectedRecipe.name;
-      } else if (dish.draftName) {
-        input.value = dish.draftName;
+        dishCard.appendChild(renderUnifiedDishCard({ dish, recipe: selectedRecipe, dayKey: dateKey }));
+        dishCard.appendChild(renderServingControl({ dish, recipe: selectedRecipe }));
+      } else if (dish.recipeId && !selectedRecipe) {
+        // レシピIDはあるが、レシピが削除されている場合
+        const deletedNotice = document.createElement("div");
+        deletedNotice.className = "dish-deleted-notice";
+
+        const message = document.createElement("p");
+        message.textContent = "レシピが削除されています";
+        deletedNotice.appendChild(message);
+
+        const clearButton = document.createElement("button");
+        clearButton.type = "button";
+        clearButton.className = "button--ghost button--small";
+        clearButton.textContent = "解除";
+        clearButton.addEventListener("click", () => {
+          clearDishSelection(dateKey, dish.id);
+        });
+        deletedNotice.appendChild(clearButton);
+
+        dishCard.appendChild(deletedNotice);
+      } else {
+        // レシピ未選択の場合は検索入力欄を表示
+        const searchWrapper = document.createElement("div");
+        searchWrapper.className = "recipe-search";
+
+        const label = document.createElement("label");
+        label.textContent = "料理名";
+
+        const input = document.createElement("input");
+        input.type = "text";
+        input.placeholder = "料理名を入力";
+        if (dish.draftName) {
+          input.value = dish.draftName;
+        }
+
+        const results = document.createElement("div");
+        results.className = "recipe-search__results";
+        results.hidden = true;
+
+        input.addEventListener("input", () => {
+          dish.draftName = input.value;
+          scheduleSave();
+          renderSearchResults({
+            query: input.value,
+            container: results,
+            dayKey: dateKey,
+            dishId: dish.id,
+          });
+        });
+
+        input.addEventListener("focus", () => {
+          renderSearchResults({
+            query: input.value,
+            container: results,
+            dayKey: dateKey,
+            dishId: dish.id,
+          });
+        });
+
+        input.addEventListener("keydown", (event) => {
+          if (event.key !== "Enter") {
+            return;
+          }
+          const trimmed = input.value.trim();
+          if (!trimmed) {
+            return;
+          }
+          event.preventDefault();
+          dish.draftName = trimmed;
+          const existing = getRecipeByName(trimmed);
+          if (existing) {
+            selectRecipeForDish(dateKey, dish.id, existing);
+            return;
+          }
+          openRecipeModal({ dayKey: dateKey, dishId: dish.id, name: trimmed });
+        });
+
+        searchWrapper.appendChild(label);
+        searchWrapper.appendChild(input);
+        searchWrapper.appendChild(results);
+
+        dishCard.appendChild(searchWrapper);
+
+        // 下書き状態の場合のヒント
+        if (dish.draftName) {
+          const hint = document.createElement("p");
+          hint.className = "recipe-detail__notice";
+          hint.textContent = "Enterで確定、または候補から選択";
+          dishCard.appendChild(hint);
+        }
       }
 
-      const results = document.createElement("div");
-      results.className = "recipe-search__results";
-      results.hidden = true;
-
-      input.addEventListener("input", () => {
-        dish.draftName = input.value;
-        scheduleSave();
-        renderSearchResults({
-          query: input.value,
-          container: results,
-          dayKey: dateKey,
-          dishId: dish.id,
-        });
-      });
-
-      input.addEventListener("focus", () => {
-        renderSearchResults({
-          query: input.value,
-          container: results,
-          dayKey: dateKey,
-          dishId: dish.id,
-        });
-      });
-
-      input.addEventListener("keydown", (event) => {
-        if (event.key !== "Enter") {
-          return;
-        }
-        const trimmed = input.value.trim();
-        if (!trimmed) {
-          return;
-        }
-        event.preventDefault();
-        dish.draftName = trimmed;
-        const existing = getRecipeByName(trimmed);
-        if (existing) {
-          selectRecipeForDish(dateKey, dish.id, existing);
-          return;
-        }
-        openRecipeModal({ dayKey: dateKey, dishId: dish.id, name: trimmed });
-      });
-
-      searchWrapper.appendChild(label);
-      searchWrapper.appendChild(input);
-      searchWrapper.appendChild(results);
-
-      dishCard.appendChild(searchWrapper);
-      dishCard.appendChild(renderDishDetail({ dish, recipe: selectedRecipe, dayKey: dateKey }));
-      dishCard.appendChild(renderServingControl({ dish, recipe: selectedRecipe }));
       dishList.appendChild(dishCard);
     });
 
@@ -1240,6 +1889,7 @@ function renderWeek(weekStart) {
 
 function renderShoppingList() {
   const checkedState = getShoppingState();
+  // Key: "食材名|単位" で集計（同じ名前でも単位が違えば別エントリ）
   const totals = new Map();
   const orderedKeys = [];
 
@@ -1264,19 +1914,16 @@ function renderShoppingList() {
         if (!name) {
           return;
         }
-        const countValue = normalizeNumber(ingredient.count);
-        const gramsValue = normalizeNumber(ingredient.grams);
-        const key = normalizeText(name);
+        const amount = normalizeNumber(ingredient.amount);
+        const unit = String(ingredient.unit || "").trim();
+        // 同じ名前 + 同じ単位 で集計
+        const key = `${normalizeText(name)}|${unit.toLowerCase()}`;
         if (!totals.has(key)) {
-          totals.set(key, { name, count: 0, grams: 0 });
+          totals.set(key, { name, amount: 0, unit });
           orderedKeys.push(key);
         }
         const entry = totals.get(key);
-        entry.count += countValue * multiplier;
-        if (gramsValue > 0) {
-          const gramsMultiplier = countValue > 0 ? countValue : 1;
-          entry.grams += gramsValue * gramsMultiplier * multiplier;
-        }
+        entry.amount += amount * multiplier;
       });
     });
   }
@@ -1317,18 +1964,15 @@ function renderShoppingList() {
     listItem.appendChild(checkbox);
     listItem.appendChild(text);
 
-    if (itemData.count > 0) {
-      const countBadge = document.createElement("span");
-      countBadge.className = "checklist__count";
-      countBadge.textContent = `x${formatNumber(itemData.count)}`;
-      listItem.appendChild(countBadge);
-    }
-
-    if (itemData.grams > 0) {
-      const gramsBadge = document.createElement("span");
-      gramsBadge.className = "checklist__count";
-      gramsBadge.textContent = `${formatNumber(itemData.grams)}g`;
-      listItem.appendChild(gramsBadge);
+    if (itemData.amount > 0) {
+      const amountBadge = document.createElement("span");
+      amountBadge.className = "checklist__count";
+      if (itemData.unit) {
+        amountBadge.textContent = `${formatNumber(itemData.amount)}${itemData.unit}`;
+      } else {
+        amountBadge.textContent = `${formatNumber(itemData.amount)}`;
+      }
+      listItem.appendChild(amountBadge);
     }
 
     if (checkbox.checked) {
@@ -1372,6 +2016,96 @@ recipeModalIngredientAddButton.addEventListener("click", () => {
   createIngredientRow(recipeModalIngredientList);
 });
 
+// タグ入力のセットアップ
+setupTagInput(recipeTagInput, recipeTagList, currentTags, () => {});
+setupTagInput(recipeModalTagInput, recipeModalTagList, modalTags, () => {});
+
+// Recipe fetch from URL buttons
+recipeFetchButton.addEventListener("click", () => {
+  handleRecipeFetch(
+    recipeUrlInput,
+    recipeNameInput,
+    recipeServingsInput,
+    ingredientList,
+    recipeInstructionsInput,
+    recipeFetchStatus
+  );
+});
+
+recipeModalFetchButton.addEventListener("click", () => {
+  handleRecipeFetch(
+    recipeModalUrlInput,
+    recipeModalNameInput,
+    recipeModalServingsInput,
+    recipeModalIngredientList,
+    recipeModalInstructionsInput,
+    recipeModalFetchStatus
+  );
+});
+
+// Text parse toggle and buttons
+recipeTextToggle.addEventListener("click", () => {
+  recipeTextArea.hidden = !recipeTextArea.hidden;
+});
+
+recipeModalTextToggle.addEventListener("click", () => {
+  recipeModalTextArea.hidden = !recipeModalTextArea.hidden;
+});
+
+recipeTextParse.addEventListener("click", async () => {
+  const text = recipeTextInput.value.trim();
+  if (!text) {
+    setFetchStatus(recipeFetchStatus, "error", "テキストを入力してください");
+    return;
+  }
+  try {
+    const recipe = await parseTextWithOllama(text, recipeFetchStatus);
+    if (recipe.name) {
+      recipeNameInput.value = recipe.name;
+    }
+    if (recipe.servings) {
+      recipeServingsInput.value = String(normalizeBaseServings(recipe.servings));
+    }
+    if (recipe.ingredients && recipe.ingredients.length > 0) {
+      resetIngredientList(ingredientList, normalizeIngredients(recipe.ingredients));
+    }
+    if (recipe.instructions) {
+      recipeInstructionsInput.value = recipe.instructions;
+    }
+    setFetchStatus(recipeFetchStatus, "success", "テキストから取得しました");
+    setTimeout(() => clearFetchStatus(recipeFetchStatus), 3000);
+  } catch (error) {
+    setFetchStatus(recipeFetchStatus, "error", error.message);
+  }
+});
+
+recipeModalTextParse.addEventListener("click", async () => {
+  const text = recipeModalTextInput.value.trim();
+  if (!text) {
+    setFetchStatus(recipeModalFetchStatus, "error", "テキストを入力してください");
+    return;
+  }
+  try {
+    const recipe = await parseTextWithOllama(text, recipeModalFetchStatus);
+    if (recipe.name) {
+      recipeModalNameInput.value = recipe.name;
+    }
+    if (recipe.servings) {
+      recipeModalServingsInput.value = String(normalizeBaseServings(recipe.servings));
+    }
+    if (recipe.ingredients && recipe.ingredients.length > 0) {
+      resetIngredientList(recipeModalIngredientList, normalizeIngredients(recipe.ingredients));
+    }
+    if (recipe.instructions) {
+      recipeModalInstructionsInput.value = recipe.instructions;
+    }
+    setFetchStatus(recipeModalFetchStatus, "success", "テキストから取得しました");
+    setTimeout(() => clearFetchStatus(recipeModalFetchStatus), 3000);
+  } catch (error) {
+    setFetchStatus(recipeModalFetchStatus, "error", error.message);
+  }
+});
+
 recipeModalBackdrop.addEventListener("click", () => closeRecipeModal());
 recipeModalCloseButton.addEventListener("click", () => closeRecipeModal());
 recipeModalCancelButton.addEventListener("click", () => closeRecipeModal());
@@ -1386,7 +2120,9 @@ recipeModalForm.addEventListener("submit", (event) => {
 
   const url = recipeModalUrlInput.value.trim();
   const ingredients = collectIngredientsFrom(recipeModalIngredientList);
+  const instructions = recipeModalInstructionsInput.value.trim();
   const baseServings = normalizeBaseServings(recipeModalServingsInput.value);
+  const tags = [...modalTags];
   const now = new Date().toISOString();
   const existing = getRecipeByName(name);
   let targetRecipe = null;
@@ -1394,7 +2130,7 @@ recipeModalForm.addEventListener("submit", (event) => {
   if (existing) {
     recipeDb = recipeDb.map((recipe) =>
       recipe.id === existing.id
-        ? { ...recipe, name, url, ingredients, baseServings, updatedAt: now }
+        ? { ...recipe, name, url, ingredients, instructions, baseServings, tags, updatedAt: now }
         : recipe,
     );
     targetRecipe = { id: existing.id, baseServings };
@@ -1404,7 +2140,9 @@ recipeModalForm.addEventListener("submit", (event) => {
       name,
       url,
       ingredients,
+      instructions,
       baseServings,
+      tags,
       createdAt: now,
       updatedAt: now,
     };
@@ -1413,6 +2151,7 @@ recipeModalForm.addEventListener("submit", (event) => {
 
   saveRecipeDb();
   renderRecipeList();
+  renderTagFilter();
 
   if (modalDayKey && modalDishId) {
     selectRecipeForDish(modalDayKey, modalDishId, targetRecipe);
@@ -1441,13 +2180,15 @@ recipeForm.addEventListener("submit", (event) => {
 
   const url = recipeUrlInput.value.trim();
   const ingredients = collectIngredients();
+  const instructions = recipeInstructionsInput.value.trim();
   const baseServings = normalizeBaseServings(recipeServingsInput.value);
+  const tags = [...currentTags];
   const now = new Date().toISOString();
 
   if (editingRecipeId) {
     recipeDb = recipeDb.map((recipe) =>
       recipe.id === editingRecipeId
-        ? { ...recipe, name, url, ingredients, baseServings, updatedAt: now }
+        ? { ...recipe, name, url, ingredients, instructions, baseServings, tags, updatedAt: now }
         : recipe,
     );
   } else {
@@ -1456,7 +2197,9 @@ recipeForm.addEventListener("submit", (event) => {
       name,
       url,
       ingredients,
+      instructions,
       baseServings,
+      tags,
       createdAt: now,
       updatedAt: now,
     });
@@ -1465,6 +2208,7 @@ recipeForm.addEventListener("submit", (event) => {
   saveRecipeDb();
   resetRecipeForm();
   renderRecipeList();
+  renderTagFilter();
   renderWeek(currentWeekStart);
 });
 
@@ -1510,3 +2254,165 @@ resetRecipeForm();
 renderWeek(currentWeekStart);
 renderRecipeList();
 syncViewFromHash();
+
+// ============================================
+// Mobile Navigation & FAB
+// ============================================
+
+const mobileNav = document.getElementById("mobileNav");
+const fabShopping = document.getElementById("fabShopping");
+const fabBadge = document.getElementById("fabBadge");
+
+function isMobileView() {
+  return window.innerWidth <= 768;
+}
+
+function updateMobileNav(currentView) {
+  if (!mobileNav) return;
+
+  // ランディングページではナビを非表示
+  if (currentView === "landing") {
+    mobileNav.hidden = true;
+    if (fabShopping) fabShopping.hidden = true;
+    return;
+  }
+
+  // モバイルではナビを表示
+  mobileNav.hidden = !isMobileView();
+
+  // アクティブなナビアイテムを更新
+  const navItems = mobileNav.querySelectorAll(".mobile-nav__item");
+  navItems.forEach((item) => {
+    const navType = item.dataset.nav;
+    const isActive = (currentView === "app" && navType === "kondate") ||
+                     (currentView === "recipes" && navType === "recipes") ||
+                     (currentView === "shopping" && navType === "shopping");
+    if (isActive) {
+      item.setAttribute("aria-current", "page");
+      item.classList.add("mobile-nav__item--active");
+    } else {
+      item.removeAttribute("aria-current");
+      item.classList.remove("mobile-nav__item--active");
+    }
+  });
+
+  // FABは献立画面でのみ表示（買い物リストへのショートカット）
+  if (fabShopping) {
+    fabShopping.hidden = !(isMobileView() && currentView === "app");
+  }
+}
+
+function scrollToShoppingList() {
+  const checklistEl = document.querySelector(".checklist");
+  if (checklistEl) {
+    checklistEl.scrollIntoView({ behavior: "smooth", block: "start" });
+    // フォーカスを移動してスクリーンリーダー対応
+    checklistEl.focus({ preventScroll: true });
+  }
+}
+
+function updateFabBadge() {
+  if (!fabBadge || !fabShopping) return;
+
+  // 買い物リストのアイテム数をカウント
+  const items = shoppingList.querySelectorAll(".checklist__item");
+  const uncheckedCount = Array.from(items).filter(
+    (item) => !item.classList.contains("checklist__item--checked")
+  ).length;
+
+  if (uncheckedCount > 0) {
+    fabBadge.textContent = uncheckedCount;
+    fabBadge.hidden = false;
+  } else {
+    fabBadge.hidden = true;
+  }
+}
+
+// Mobile nav click handlers
+if (mobileNav) {
+  mobileNav.addEventListener("click", (event) => {
+    const navItem = event.target.closest(".mobile-nav__item");
+    if (!navItem) return;
+
+    const navType = navItem.dataset.nav;
+    switch (navType) {
+      case "kondate":
+        openAppView({ scroll: false });
+        history.replaceState(null, "", "#app");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        break;
+      case "shopping":
+        // 献立画面に移動してから買い物リストにスクロール
+        if (appSection.hidden) {
+          openAppView({ scroll: false });
+          history.replaceState(null, "", "#app");
+        }
+        setTimeout(scrollToShoppingList, 100);
+        break;
+      case "recipes":
+        openRecipesView({ scroll: false });
+        history.replaceState(null, "", "#recipes");
+        window.scrollTo({ top: 0, behavior: "smooth" });
+        break;
+    }
+  });
+}
+
+// FAB click handler
+if (fabShopping) {
+  fabShopping.addEventListener("click", scrollToShoppingList);
+}
+
+// Override view functions to update mobile nav
+const originalOpenAppView = openAppView;
+const originalOpenRecipesView = openRecipesView;
+const originalOpenLandingView = openLandingView;
+
+function openAppViewWithNav(options) {
+  originalOpenAppView.call(this, options);
+  updateMobileNav("app");
+  setTimeout(updateFabBadge, 100);
+}
+
+function openRecipesViewWithNav(options) {
+  originalOpenRecipesView.call(this, options);
+  updateMobileNav("recipes");
+}
+
+function openLandingViewWithNav() {
+  originalOpenLandingView.call(this);
+  updateMobileNav("landing");
+}
+
+// Replace global functions
+window.openAppView = openAppViewWithNav;
+window.openRecipesView = openRecipesViewWithNav;
+window.openLandingView = openLandingViewWithNav;
+
+// Override renderShoppingList to update FAB badge
+const originalRenderShoppingList = renderShoppingList;
+function renderShoppingListWithBadge() {
+  originalRenderShoppingList.call(this);
+  updateFabBadge();
+}
+
+// Replace the renderShoppingList reference
+window.renderShoppingList = renderShoppingListWithBadge;
+
+// Update on resize
+window.addEventListener("resize", () => {
+  const currentView = !landingSection.hidden ? "landing" :
+                      !appSection.hidden ? "app" : "recipes";
+  updateMobileNav(currentView);
+});
+
+// Initial mobile nav state
+function initMobileNav() {
+  const currentView = !landingSection.hidden ? "landing" :
+                      !appSection.hidden ? "app" : "recipes";
+  updateMobileNav(currentView);
+  updateFabBadge();
+}
+
+// Run after initial render
+setTimeout(initMobileNav, 0);
